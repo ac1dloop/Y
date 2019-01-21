@@ -26,14 +26,6 @@ namespace Util {
 
 using std::string;
 
-//void str_to_nvt(string& str){
-//    str+="\r\n";
-//}
-
-//void nvt_to_str(string& str){
-//    str=str.substr(0, str.size()-2);
-//}
-
 string str_to_nvt(const std::string &str){
     return string(str+"\r\n");
 }
@@ -52,6 +44,56 @@ constexpr int ipv6=AF_INET6;
 constexpr bool is_address(int a){
     return (a==ipv4||a==ipv6);
 }
+
+enum class ErrTypes {
+    descriptor,
+    timeout,
+    address_format,
+    socket_option,
+    io,
+    unknown
+};
+
+struct ExceptionInterface {
+
+    ExceptionInterface(){}
+    virtual ~ExceptionInterface(){}
+
+    virtual const char* const strErr() const {}
+
+};
+
+typedef ExceptionInterface E;
+
+template <ErrTypes T>
+struct SocketException: ExceptionInterface {
+
+    SocketException(){}
+
+    virtual const char* const strErr() const {
+        switch (T) {
+        case ErrTypes::address_format:
+            return "address_format";
+            break;
+        case ErrTypes::timeout:
+            return "timeout";
+            break;
+        case ErrTypes::descriptor:
+            return "descriptor";
+            break;
+        case ErrTypes::io:
+            return "io";
+            break;
+        case ErrTypes::socket_option:
+            return "invalid socket option";
+            break;
+        default:
+            return "unknown error";
+            break;
+        }
+    }
+
+};
 
 /* exceptions specific to Y namespace */
 
@@ -89,6 +131,12 @@ struct Err:public std::exception{
             break;
         case socket_option:
             return "socket_option";
+            break;
+        case write_error:
+            return "write_error";
+            break;
+        case read_error:
+            return "read_error";
             break;
         default:
             return "undefined";
@@ -696,6 +744,22 @@ protected:
 
 typedef std::pair<std::string, ip_addr<ipv4>> msg_host4;
 typedef std::pair<std::string, ip_addr<ipv6>> msg_host6;
+
+struct SocketState {
+
+    SocketState()=default;
+
+    void operator()(){
+
+    }
+
+    std::string strState(){
+
+    }
+
+
+
+};
 
 } //Y namespace
 

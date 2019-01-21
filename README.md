@@ -14,7 +14,6 @@ Poor C++ binding for linux socket API
 #### TO-DO
 
  * Socket states
- * Possibly make them std::streambuf compliant
  * Correct reading writing with socket states
  * Async r/w
  * Unix domain socket support
