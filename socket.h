@@ -26,12 +26,20 @@ namespace Util {
 
 using std::string;
 
-void str_to_nvt(string& str){
-    str+="\r\n";
+//void str_to_nvt(string& str){
+//    str+="\r\n";
+//}
+
+//void nvt_to_str(string& str){
+//    str=str.substr(0, str.size()-2);
+//}
+
+string str_to_nvt(const std::string &str){
+    return string(str+"\r\n");
 }
 
-void nvt_to_str(string& str){
-    str=str.substr(0, str.size()-2);
+string nvt_to_str(const std::string &str){
+    return str.substr(0, str.size()-2);
 }
 
 } //Util namespace
@@ -283,6 +291,10 @@ private:
 template<int T>
 struct TCPSocket{
 
+    int getSock(){
+        return m_sock;
+    }
+
     TCPSocket(){
         m_sock=socket(T, SOCK_STREAM, IPPROTO_TCP);
     }
@@ -301,7 +313,7 @@ struct TCPSocket{
     }
 
     TCPSocket(TCPSocket&& op2){
-        std::swap(m_sock, op2.m_sock);
+        m_sock=op2.m_sock;
         std::swap(m_addr, op2.m_addr);
     }
 
@@ -323,6 +335,14 @@ struct TCPSocket{
         std::swap(m_addr, op2.m_addr);
 
         return *this;
+    }
+
+    void operator<<(const std::string& op){
+        this->write(Util::str_to_nvt(op));
+    }
+
+    void operator>>(std::string& op){
+        op=Util::nvt_to_str(this->read());
     }
 
     void setOpt(const int& opt, const int& val=1){
@@ -370,7 +390,7 @@ struct TCPSocket{
 
     TCPSocket Accept(){
         TCPSocket<T> tmp_sock=accept(m_sock, &tmp_sock.m_addr, &tmp_sock.m_addr.socklen);
-        std::cout << "in Accept() " << tmp_sock.Addr() << ":" << tmp_sock.Port() << std::endl;
+        std::cout << "in Accept() " << tmp_sock.Addr() << ":" << tmp_sock.Port()  << " client_fd: " << tmp_sock.getSock() << std::endl;
         return tmp_sock;
     }
 
@@ -399,7 +419,7 @@ struct TCPSocket{
         int ret=close(m_sock);
 
         if (ret<0)
-            throw std::system_error(errno, std::generic_category());
+            throw std::system_error(errno, std::generic_category()); //Looks like very bad idea
     }
 
     std::string read(const std::string& delim="\r\n"){
@@ -409,9 +429,12 @@ struct TCPSocket{
         std::string recv_str="";
         int ret=0;
         for (;;){
-            memset(recv_buffer, 0, sizeof(recv_buffer));
+//            memset(recv_buffer, 0, sizeof(recv_buffer));
             ret=recv(m_sock, recv_buffer, sizeof(recv_buffer), 0);
-            recv_str.append(recv_buffer);
+
+            if (ret>0)
+                recv_str+=std::string(recv_buffer, ret);
+
             if (ret==0){
                 break;
             } else if (recv_str.size()>=delim.size()&&
@@ -494,7 +517,7 @@ struct UDPSocket{
     }
 
     UDPSocket(UDPSocket&& op2){
-        std::swap(m_sock, op2.m_sock);
+        m_sock=op2.m_sock;
         std::swap(m_addr, op2.m_addr);
     }
 
