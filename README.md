@@ -10,3 +10,12 @@ Poor C++ binding for linux socket API
 5. send data
 
 ### In files client.cpp and server.cpp examples are provided
+
+#### TO-DO
+
+ * Socket states
+ * Possibly make them std::streambuf compliant
+ * Correct reading writing with socket states
+ * Async r/w
+ * Unix domain socket support
+ * Winsock support
