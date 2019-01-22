@@ -51,7 +51,8 @@ enum class ErrTypes {
     address_format,
     socket_option,
     io,
-    unknown
+    unknown,
+    cant_connect,
 };
 
 struct ExceptionInterface {
@@ -63,7 +64,7 @@ struct ExceptionInterface {
 
 };
 
-typedef ExceptionInterface E;
+typedef ExceptionInterface Err;
 
 template <ErrTypes T>
 struct SocketException: ExceptionInterface {
@@ -87,59 +88,11 @@ struct SocketException: ExceptionInterface {
         case ErrTypes::socket_option:
             return "invalid socket option";
             break;
+        case ErrTypes::cant_connect:
+            return "unable to connect";
+            break;
         default:
             return "unknown error";
-            break;
-        }
-    }
-
-};
-
-/* exceptions specific to Y namespace */
-
-struct Err:public std::exception{
-
-    enum ytype{
-        unknown,
-        descriptor,
-        timeout,
-        address_format,
-        connection,
-        socket_option,
-        write_error,
-        read_error,
-    } m_type;
-
-    Err(ytype type):m_type(type){}
-
-    virtual const char* what() const throw() {
-        switch (m_type) {
-        case descriptor:
-            return "descriptor";
-            break;
-        case timeout:
-            return "timeout";
-            break;
-        case unknown:
-            return "unknown";
-            break;
-        case address_format:
-            return "address_format";
-            break;
-        case connection:
-            return "connecting";
-            break;
-        case socket_option:
-            return "socket_option";
-            break;
-        case write_error:
-            return "write_error";
-            break;
-        case read_error:
-            return "read_error";
-            break;
-        default:
-            return "undefined";
             break;
         }
     }
@@ -155,7 +108,7 @@ struct sockfd{
 
     sockfd(const int& i){
         if (i<0)
-            throw Err(Err::descriptor);
+            throw SocketException<ErrTypes::descriptor>();
 
         m_fd=i;
     }
@@ -166,7 +119,7 @@ struct sockfd{
 
     sockfd& operator=(const int& i){
         if (i<0)
-            throw Err(Err::descriptor);
+            throw
 
         m_fd=i;
         return *this;
@@ -205,7 +158,7 @@ struct ip_addr<ipv4>{
 
         if (ret<=0){
             if (ret==0)
-                throw Err(Err::address_format);
+                throw SocketException<ErrTypes::address_format>();
 
             if (ret<0)
                 throw std::system_error(errno, std::generic_category());
@@ -277,7 +230,7 @@ struct ip_addr<ipv6>{
 
         if (ret<=0){
             if (ret==0)
-                throw Err(Err::address_format);
+                throw SocketException<ErrTypes::address_format>();
 
             if (ret<0)
                 throw std::system_error(errno, std::generic_category());
@@ -397,7 +350,7 @@ struct TCPSocket{
         int ret;
         ret=setsockopt(m_sock, SOL_SOCKET, opt, &val, sizeof(val));
         if (ret<0)
-            throw Err(Err::socket_option);
+            throw SocketException<ErrTypes::socket_option>();
     }
 
     void Bind(const std::string& add, const uint16_t& port){
@@ -412,7 +365,7 @@ struct TCPSocket{
         size_t d=add.rfind(':');
 
         if (d==std::string::npos)
-            throw Err(Err::address_format);
+            throw SocketException<ErrTypes::address_format>();
 
         m_addr=ip_addr<T>(add.substr(0, d),
                           std::stoul(add.substr(d+1, add.size() )));
@@ -450,17 +403,17 @@ struct TCPSocket{
             throw std::system_error(errno, std::generic_category());
     }
 
-    void AsyConnect() const {
+    void Connect(int timeout) const {
         int ret;
         std::future<int> fut=std::async(std::launch::async, connect, m_sock, &m_addr, m_addr.socklen);
         std::future_status status;
-        fut.wait_for(std::chrono::seconds{3});
+        fut.wait_for(std::chrono::seconds{timeout});
         if (status==std::future_status::timeout)
             throw std::future_status::timeout;
 
         ret=fut.get();
         if (ret<0)
-            throw Err(Err::connection);
+            throw SocketException<ErrTypes::cant_connect>();
     }
 
     void Close(){
@@ -512,7 +465,7 @@ struct TCPSocket{
         for (size_t toWrite=sz;toWrite!=0;toWrite-=ret){
             ret=send(m_sock, buff+ret, toWrite, 0);
             if (ret<0)
-                throw Err(Err::write_error);
+                throw SocketException<ErrTypes::io>();
 
         }
     }
@@ -522,9 +475,9 @@ struct TCPSocket{
         for (size_t toRead=sz;toRead!=0;toRead-=ret){
             ret=recv(m_sock, buff+ret, toRead, 0);
             if (ret==0){
-                throw Err(Err::connection);
+                throw SocketException<ErrTypes::cant_connect>();
             } else if (ret==-1){
-                throw Err(Err::read_error);
+                throw SocketException<ErrTypes::io>();
             }
         }
     }
@@ -597,7 +550,7 @@ struct UDPSocket{
         int ret;
 
         if (d==std::string::npos)
-            throw Err(Err::address_format);
+            throw SocketException<ErrTypes::address_format>();
 
         m_addr=ip_addr<T>(add.substr(0, d), add.substr(d+1, add.size()));
 
@@ -625,7 +578,7 @@ struct UDPSocket{
         int ret;
         ret=setsockopt(m_sock, SOL_SOCKET, opt, &val, sizeof(val));
         if (ret<0)
-            throw Err(Err::socket_option);
+            throw SocketException<ErrTypes::socket_option>();
     }
 
     void send(const std::string& msg, ip_addr<T>& target){
