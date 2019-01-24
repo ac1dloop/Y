@@ -48,11 +48,11 @@ constexpr bool is_address(int a){
 enum class ErrTypes {
     descriptor,
     timeout,
-    address_format,
     socket_option,
     io,
     unknown,
     cant_connect,
+    address_format,
 };
 
 struct ExceptionInterface {
@@ -117,9 +117,9 @@ struct sockfd{
         m_fd=op2.m_fd;
     }
 
-    sockfd& operator=(const int& i){
+    sockfd& operator=(int i){
         if (i<0)
-            throw
+            throw SocketException<ErrTypes::descriptor>();
 
         m_fd=i;
         return *this;
@@ -142,7 +142,6 @@ struct sockfd{
 
 template <int T>
 struct ip_addr{
-
 };
 
 template <>
@@ -198,6 +197,10 @@ struct ip_addr<ipv4>{
         inet_ntop(ipv4, &addr4.sin_addr, tmp, 50);
 
         return std::string(tmp);
+    }
+
+    void Zero(){
+        addr4.sin_addr.s_addr=htonl(INADDR_ANY);
     }
 
     /* In case it is client address port is ephemeral */
@@ -270,6 +273,10 @@ struct ip_addr<ipv6>{
         inet_ntop(ipv6, &addr6.sin6_addr, tmp, 50);
 
         return std::string(tmp);
+    }
+
+    void Zero(){
+        addr6.sin6_addr=IN6ADDR_ANY_INIT;
     }
 
     /* In case it is client address port is ephemeral */
@@ -403,13 +410,12 @@ struct TCPSocket{
             throw std::system_error(errno, std::generic_category());
     }
 
-    void Connect(int timeout) const {
+    void Connect(int timeout=3) const {
         int ret;
         std::future<int> fut=std::async(std::launch::async, connect, m_sock, &m_addr, m_addr.socklen);
-        std::future_status status;
-        fut.wait_for(std::chrono::seconds{timeout});
+        std::future_status status=fut.wait_for(std::chrono::seconds{timeout});
         if (status==std::future_status::timeout)
-            throw std::future_status::timeout;
+            throw SocketException<ErrTypes::timeout>();
 
         ret=fut.get();
         if (ret<0)
@@ -509,6 +515,7 @@ struct UDPSocket{
 
     UDPSocket(const std::string &add):m_addr(add.substr(0, add.rfind(':')),
                                              std::stoul(add.substr(add.rfind(':')+1, add.size())) ){
+
         m_sock=socket(T, SOCK_DGRAM, IPPROTO_UDP);
     }
 
@@ -534,6 +541,17 @@ struct UDPSocket{
         std::swap(m_addr, op2.m_addr);
 
         return *this;
+    }
+
+    void BindAny(){
+        int ret;
+        setOpt(SO_REUSEADDR);
+
+        m_addr.Zero();
+        ret=bind(m_sock, &m_addr, m_addr.socklen);
+
+        if (ret<0)
+            throw std::system_error(errno, std::generic_category());
     }
 
     void Bind(){
@@ -577,6 +595,7 @@ struct UDPSocket{
     void setOpt(const int& opt, const int& val=1){
         int ret;
         ret=setsockopt(m_sock, SOL_SOCKET, opt, &val, sizeof(val));
+
         if (ret<0)
             throw SocketException<ErrTypes::socket_option>();
     }
@@ -697,22 +716,6 @@ protected:
 
 typedef std::pair<std::string, ip_addr<ipv4>> msg_host4;
 typedef std::pair<std::string, ip_addr<ipv6>> msg_host6;
-
-struct SocketState {
-
-    SocketState()=default;
-
-    void operator()(){
-
-    }
-
-    std::string strState(){
-
-    }
-
-
-
-};
 
 } //Y namespace
 
