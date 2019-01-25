@@ -106,22 +106,24 @@ struct sockfd{
 
     sockfd()=default;
 
-    sockfd(const int& i){
+    sockfd(int i):m_fd(i){
+        if (i<0)
+            throw SocketException<ErrTypes::descriptor>();
+    }
+
+    sockfd(const sockfd& op2):m_fd(op2.m_fd){}
+
+    sockfd& operator=(int i){
+
+//        PRINT_DBG("sockfd& operator=(int i)");
+
         if (i<0)
             throw SocketException<ErrTypes::descriptor>();
 
         m_fd=i;
-    }
 
-    sockfd(const sockfd& op2){
-        m_fd=op2.m_fd;
-    }
+//        PRINT_DBG(std::string("fd="+std::to_string(m_fd)+" i="+std::to_string(i)));
 
-    sockfd& operator=(const int& i){
-        if (i<0)
-            throw
-
-        m_fd=i;
         return *this;
     }
 
@@ -296,16 +298,16 @@ struct TCPSocket{
         return m_sock;
     }
 
-    TCPSocket(){
-        m_sock=socket(T, SOCK_STREAM, IPPROTO_TCP);
-    }
+    TCPSocket():m_sock(socket(T, SOCK_STREAM, IPPROTO_TCP)){}
 
-    TCPSocket(const int& fd){
+    TCPSocket(int fd){
         m_sock=fd;
     }
 
-    TCPSocket(const std::string& addr, const uint16_t& port):m_addr(addr, port){
-        m_sock=socket(T, SOCK_STREAM, IPPROTO_TCP);
+    TCPSocket(const std::string& addr, const uint16_t& port):m_addr(addr, port),m_sock(socket(T, SOCK_STREAM, IPPROTO_TCP)){
+
+//        PRINT_DBG("TCPSocket(string&, uint16_t)");
+
     }
 
     TCPSocket(const TCPSocket& op2){
@@ -318,7 +320,10 @@ struct TCPSocket{
         std::swap(m_addr, op2.m_addr);
     }
 
-    TCPSocket& operator =(const int& fd){
+    TCPSocket& operator =(int fd){
+
+//        PRINT_DBG("TCPSocket& operator=(int fd");
+
         m_sock=fd;
 
         return *this;
@@ -332,7 +337,7 @@ struct TCPSocket{
     }
 
     TCPSocket& operator=(TCPSocket&& op2){
-        std::swap(m_sock, op2.m_sock);
+        m_sock=op2.m_sock;
         std::swap(m_addr, op2.m_addr);
 
         return *this;
@@ -350,7 +355,7 @@ struct TCPSocket{
         int ret;
         ret=setsockopt(m_sock, SOL_SOCKET, opt, &val, sizeof(val));
         if (ret<0)
-            throw SocketException<ErrTypes::socket_option>();
+            state=false;
     }
 
     void Bind(const std::string& add, const uint16_t& port){
@@ -365,7 +370,7 @@ struct TCPSocket{
         size_t d=add.rfind(':');
 
         if (d==std::string::npos)
-            throw SocketException<ErrTypes::address_format>();
+            state=false;
 
         m_addr=ip_addr<T>(add.substr(0, d),
                           std::stoul(add.substr(d+1, add.size() )));
@@ -378,7 +383,7 @@ struct TCPSocket{
         ret=bind(m_sock, &m_addr, m_addr.socklen);
 
         if (ret<0)
-            throw std::system_error(errno, std::generic_category());
+            state=false;
     }
 
     void Listen(const int& backlog=30){
@@ -386,7 +391,7 @@ struct TCPSocket{
         ret=listen(m_sock, backlog);
 
         if (ret<0)
-            throw std::system_error(errno, std::generic_category());
+            state=false;
     }
 
     TCPSocket Accept(){
@@ -400,7 +405,7 @@ struct TCPSocket{
         ret=connect(m_sock, &m_addr, m_addr.socklen);
 
         if (ret<0)
-            throw std::system_error(errno, std::generic_category());
+            state=false;
     }
 
     void Connect(int timeout) const {
@@ -409,18 +414,23 @@ struct TCPSocket{
         std::future_status status;
         fut.wait_for(std::chrono::seconds{timeout});
         if (status==std::future_status::timeout)
-            throw std::future_status::timeout;
+            state=false;
 
         ret=fut.get();
         if (ret<0)
-            throw SocketException<ErrTypes::cant_connect>();
+            state=false;
     }
 
     void Close(){
-        int ret=close(m_sock);
 
-        if (ret<0)
-            throw std::system_error(errno, std::generic_category()); //Looks like very bad idea
+        PRINT_DBG("Close()");
+
+        if (state){
+            int ret=close(m_sock);
+
+            if (ret<0)
+                throw std::system_error(errno, std::generic_category()); //Looks like very bad idea
+        }
     }
 
     std::string read(const std::string& delim="\r\n"){
@@ -437,12 +447,14 @@ struct TCPSocket{
                 recv_str+=std::string(recv_buffer, ret);
 
             if (ret==0){
+                state=false;
                 break;
             } else if (recv_str.size()>=delim.size()&&
                        recv_str.substr(recv_str.size()-delim.size(), recv_str.size())==delim){
                 break;
             } else if (ret==-1){
-                throw std::system_error(errno, std::generic_category());
+                state=false;
+                break;
             }
         }
         return recv_str;
@@ -455,7 +467,7 @@ struct TCPSocket{
         if (!msg.empty()){
             int ret=send(m_sock, msg.c_str(), msg.size(), MSG_NOSIGNAL);
             if (ret==-1){
-                throw std::system_error(errno, std::generic_category());
+                state=false;
             }
         }
     }
@@ -465,7 +477,7 @@ struct TCPSocket{
         for (size_t toWrite=sz;toWrite!=0;toWrite-=ret){
             ret=send(m_sock, buff+ret, toWrite, 0);
             if (ret<0)
-                throw SocketException<ErrTypes::io>();
+                state=false;
 
         }
     }
@@ -475,9 +487,9 @@ struct TCPSocket{
         for (size_t toRead=sz;toRead!=0;toRead-=ret){
             ret=recv(m_sock, buff+ret, toRead, 0);
             if (ret==0){
-                throw SocketException<ErrTypes::cant_connect>();
+                state=false;
             } else if (ret==-1){
-                throw SocketException<ErrTypes::io>();
+                state=false;
             }
         }
     }
@@ -489,6 +501,8 @@ struct TCPSocket{
     uint16_t Port(){
         return m_addr.Port();
     }
+
+    bool state{true};
 
 protected:
     ip_addr<T> m_addr;
@@ -688,6 +702,7 @@ struct UDPSocket{
         return m_addr.Port();
     }
 
+    bool state;
 
 protected:
     ip_addr<T> m_addr;
@@ -697,22 +712,6 @@ protected:
 
 typedef std::pair<std::string, ip_addr<ipv4>> msg_host4;
 typedef std::pair<std::string, ip_addr<ipv6>> msg_host6;
-
-struct SocketState {
-
-    SocketState()=default;
-
-    void operator()(){
-
-    }
-
-    std::string strState(){
-
-    }
-
-
-
-};
 
 } //Y namespace
 
