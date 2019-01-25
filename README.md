@@ -13,8 +13,6 @@ Poor C++ binding for linux socket API
 
 #### TO-DO
 
- * Socket states
- * Correct reading writing with socket states
  * Async r/w
  * Unix domain socket support
  * Winsock support
