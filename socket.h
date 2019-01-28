@@ -53,12 +53,15 @@ enum class ErrTypes {
     unknown,
     cant_connect,
     address_format,
+    connection_closed,
 };
 
 struct ExceptionInterface {
 
     ExceptionInterface(){}
     virtual ~ExceptionInterface(){}
+
+    /* COOOOOOOOOOOOOOOOOOOOOOOOOONST :D */
 
     virtual const char* const strErr() const {}
 
@@ -146,11 +149,9 @@ struct ip_addr{
 
 template <>
 struct ip_addr<ipv4>{
-    ip_addr(){
-            socklen=sizeof(addr4);
-    }
+    ip_addr():socklen(sizeof(addr4)){ }
 
-    explicit ip_addr(const std::string& address, const uint16_t port){
+    explicit ip_addr(const std::string& address, uint16_t port){
         int ret;
 
         ret=inet_pton(ipv4, address.c_str(), &addr4.sin_addr);
@@ -168,10 +169,8 @@ struct ip_addr<ipv4>{
         socklen=sizeof(addr4);
     }
 
-    ip_addr(const ip_addr& op2){
-        addr4=op2.addr4;
-        socklen=op2.socklen;
-    }
+    ip_addr(const ip_addr& op2):addr4(op2.addr4),
+                                socklen(op2.socklen) {}
 
     ip_addr(ip_addr&& op2){
         std::swap(addr4, op2.addr4);
@@ -199,7 +198,7 @@ struct ip_addr<ipv4>{
         return std::string(tmp);
     }
 
-    void Zero(){
+    void toAnyAddr(){
         addr4.sin_addr.s_addr=htonl(INADDR_ANY);
     }
 
@@ -222,11 +221,9 @@ private:
 
 template <>
 struct ip_addr<ipv6>{
-    ip_addr(){
-            socklen=sizeof(addr6);
-    }
+    ip_addr():socklen(sizeof(addr6)) { }
 
-    explicit ip_addr(const std::string& address, const uint16_t port){
+    explicit ip_addr(const std::string& address, uint16_t port){
         int ret;
 
         ret=inet_pton(ipv6, address.c_str(), &addr6.sin6_addr);
@@ -244,10 +241,8 @@ struct ip_addr<ipv6>{
         socklen=sizeof(addr6);
     }
 
-    ip_addr(const ip_addr& op2){
-        addr6=op2.addr6;
-        socklen=op2.socklen;
-    }
+    ip_addr(const ip_addr& op2):addr6(op2.addr6),
+                                socklen(op2.socklen) {}
 
     ip_addr(ip_addr&& op2){
         std::swap(addr6, op2.addr6);
@@ -263,6 +258,7 @@ struct ip_addr<ipv6>{
 
     ip_addr& operator=(ip_addr&& op2){
         std::swap(addr6, op2.addr6);
+        std::swap(socklen, op2.socklen); //may be unnecessary
 
         return *this;
     }
@@ -275,7 +271,7 @@ struct ip_addr<ipv6>{
         return std::string(tmp);
     }
 
-    void Zero(){
+    void toAnyAddr(){
         addr6.sin6_addr=IN6ADDR_ANY_INIT;
     }
 
@@ -299,33 +295,22 @@ private:
 template<int T>
 struct TCPSocket{
 
-    int getSock(){
-        return m_sock;
-    }
+    TCPSocket():m_sock(socket(T, SOCK_STREAM, IPPROTO_TCP)) {}
 
-    TCPSocket(){
-        m_sock=socket(T, SOCK_STREAM, IPPROTO_TCP);
-    }
+    TCPSocket(int fd):m_sock(fd) {}
 
-    TCPSocket(const int& fd){
-        m_sock=fd;
-    }
+    TCPSocket(const std::string& addr, const uint16_t& port):m_addr(addr, port),
+                                                             m_sock(socket(T, SOCK_STREAM, IPPROTO_TCP)) {}
 
-    TCPSocket(const std::string& addr, const uint16_t& port):m_addr(addr, port){
-        m_sock=socket(T, SOCK_STREAM, IPPROTO_TCP);
-    }
-
-    TCPSocket(const TCPSocket& op2){
-        m_sock=op2.m_sock;
-        m_addr=op2.m_addr;
-    }
+    TCPSocket(const TCPSocket& op2):m_sock(op2.m_sock),
+                                    m_addr(op2.m_addr) {}
 
     TCPSocket(TCPSocket&& op2){
         m_sock=op2.m_sock;
         std::swap(m_addr, op2.m_addr);
     }
 
-    TCPSocket& operator =(const int& fd){
+    TCPSocket& operator =(int fd){
         m_sock=fd;
 
         return *this;
@@ -353,7 +338,7 @@ struct TCPSocket{
         op=Util::nvt_to_str(this->read());
     }
 
-    void setOpt(const int& opt, const int& val=1){
+    void setOpt(int opt, int val=1){
         int ret;
         ret=setsockopt(m_sock, SOL_SOCKET, opt, &val, sizeof(val));
         if (ret<0)
@@ -362,8 +347,6 @@ struct TCPSocket{
 
     void Bind(const std::string& add, const uint16_t& port){
         m_addr=ip_addr<T>(add, port);
-
-        std::cout << "Address " << m_addr.Addr() << ":" << m_addr.Port() << std::endl;
 
         Bind();
     }
@@ -398,7 +381,6 @@ struct TCPSocket{
 
     TCPSocket Accept(){
         TCPSocket<T> tmp_sock=accept(m_sock, &tmp_sock.m_addr, &tmp_sock.m_addr.socklen);
-        std::cout << "in Accept() " << tmp_sock.Addr() << ":" << tmp_sock.Port()  << " client_fd: " << tmp_sock.getSock() << std::endl;
         return tmp_sock;
     }
 
@@ -431,18 +413,16 @@ struct TCPSocket{
 
     std::string read(const std::string& delim="\r\n"){
 
-//        std::cout << "TCPSocket::read()" << std::endl;
-
         std::string recv_str="";
         int ret=0;
         for (;;){
-//            memset(recv_buffer, 0, sizeof(recv_buffer));
             ret=recv(m_sock, recv_buffer, sizeof(recv_buffer), 0);
 
             if (ret>0)
                 recv_str+=std::string(recv_buffer, ret);
 
             if (ret==0){
+                throw SocketException<ErrTypes::connection_closed>();
                 break;
             } else if (recv_str.size()>=delim.size()&&
                        recv_str.substr(recv_str.size()-delim.size(), recv_str.size())==delim){
@@ -456,12 +436,10 @@ struct TCPSocket{
 
     void write(const std::string& msg){
 
-//        std::cout << "TCPSocket::write()" << std::endl;
-
         if (!msg.empty()){
             int ret=send(m_sock, msg.c_str(), msg.size(), MSG_NOSIGNAL);
             if (ret==-1){
-                throw std::system_error(errno, std::generic_category());
+                throw SocketException<ErrTypes::io>();
             }
         }
     }
@@ -481,18 +459,18 @@ struct TCPSocket{
         for (size_t toRead=sz;toRead!=0;toRead-=ret){
             ret=recv(m_sock, buff+ret, toRead, 0);
             if (ret==0){
-                throw SocketException<ErrTypes::cant_connect>();
+                throw SocketException<ErrTypes::connection_closed>();
             } else if (ret==-1){
                 throw SocketException<ErrTypes::io>();
             }
         }
     }
 
-    std::string Addr(){
+    std::string Addr() const {
         return m_addr.Addr();
     }
 
-    uint16_t Port(){
+    uint16_t Port() const {
         return m_addr.Port();
     }
 
@@ -505,24 +483,15 @@ protected:
 template<int T>
 struct UDPSocket{
 
-    UDPSocket(){
-        m_sock=socket(T, SOCK_DGRAM, IPPROTO_UDP);
-    }
+    UDPSocket():m_sock(socket(T, SOCK_DGRAM, IPPROTO_UDP)) {}
 
-    UDPSocket(const std::string& add, const uint16_t& port):m_addr(add, port){
-        m_sock=socket(T, SOCK_DGRAM, IPPROTO_UDP);
-    }
+    UDPSocket(const std::string& add, const uint16_t& port):m_addr(add, port), m_sock(socket(T, SOCK_DGRAM, IPPROTO_UDP)) {}
 
     UDPSocket(const std::string &add):m_addr(add.substr(0, add.rfind(':')),
-                                             std::stoul(add.substr(add.rfind(':')+1, add.size())) ){
+                                             std::stoul(add.substr(add.rfind(':')+1, add.size())) ), m_sock(socket(T, SOCK_DGRAM, IPPROTO_UDP)) {}
 
-        m_sock=socket(T, SOCK_DGRAM, IPPROTO_UDP);
-    }
-
-    UDPSocket(const UDPSocket& op2){
-        m_sock=op2.m_sock;
-        m_addr=op2.m_addr;
-    }
+    UDPSocket(const UDPSocket& op2):m_sock(op2.m_sock),
+                                    m_addr(op2.m_addr) {}
 
     UDPSocket(UDPSocket&& op2){
         m_sock=op2.m_sock;
@@ -547,7 +516,7 @@ struct UDPSocket{
         int ret;
         setOpt(SO_REUSEADDR);
 
-        m_addr.Zero();
+        m_addr.toAnyAddr();
         ret=bind(m_sock, &m_addr, m_addr.socklen);
 
         if (ret<0)
@@ -603,8 +572,8 @@ struct UDPSocket{
     void send(const std::string& msg, ip_addr<T>& target){
         if (!msg.empty()){
             int ret=sendto(m_sock, msg.c_str(), msg.size(), 0, &target, target.socklen);
-            if (ret==-1){
-                throw std::system_error(errno, std::generic_category());
+            if (ret<0){
+                throw SocketException<ErrTypes::io>();
             }
         }
     }
@@ -612,8 +581,8 @@ struct UDPSocket{
     void send(const std::string& msg){
         if (!msg.empty()){
             int ret=sendto(m_sock, msg.c_str(), msg.size(), 0, &m_addr, m_addr.socklen);
-            if (ret==-1){
-                throw std::system_error(errno, std::generic_category());
+            if (ret<0){
+                throw SocketException<ErrTypes::io>();
             }
         }
     }
@@ -627,7 +596,7 @@ struct UDPSocket{
         recv_str.append(recv_buffer);
 
         if (ret<0)
-            throw std::system_error(errno, std::generic_category());
+            throw SocketException<ErrTypes::io>();
 
         return std::make_pair(recv_str, client);
     }
@@ -637,16 +606,15 @@ struct UDPSocket{
         ip_addr<T> client;
         int ret=0;
         for (;;){
-            memset(recv_buffer, 0, sizeof(recv_buffer)); // <<--- ???????????
             ret=recvfrom(m_sock, recv_buffer, sizeof(recv_buffer), 0, &client, &client.socklen);
-            recv_str.append(recv_buffer);
+            recv_str+=std::string(recv_buffer, ret);
             if (ret==0){
                 break;
             } else if (recv_str.size()>=delim.size()&&
                        recv_str.substr(recv_str.size()-delim.size(), recv_str.size())==delim){
                 break;
             } else if (ret==-1){
-                throw std::system_error(errno, std::generic_category());
+                throw SocketException<ErrTypes::io>();
             }
         }
         return std::make_pair(recv_str, client);
@@ -657,8 +625,8 @@ struct UDPSocket{
         int ret=0;
         for (;toWrite!=0;){
             ret=sendto(m_sock, buff+ret, toWrite, 0, &m_addr, m_addr.socklen);
-            if (ret==-1){
-                throw std::system_error(errno,std::generic_category());
+            if (ret<0){
+                throw SocketException<ErrTypes::io>();
             }
             toWrite-=ret;
         }
@@ -669,8 +637,8 @@ struct UDPSocket{
         int ret=0;
         for (;toWrite!=0;){
             ret=sendto(m_sock, buff+ret, toWrite, 0, &target, target.socklen);
-            if (ret==-1){
-                throw std::system_error(errno,std::generic_category());
+            if (ret<0){
+                throw SocketException<ErrTypes::io>();
             }
             toWrite-=ret;
         }
@@ -684,8 +652,8 @@ struct UDPSocket{
             ret=recvfrom(m_sock, buff+ret, toRead, 0, &client, &client.socklen);
             if (ret==0){
                 break;
-            } else if (ret==-1){
-                throw std::system_error(errno,std::generic_category());
+            } else if (ret<0){
+                throw SocketException<ErrTypes::io>();
             }
             toRead-=ret;
         }
@@ -695,15 +663,16 @@ struct UDPSocket{
 
     void Close(){
         int ret=close(m_sock);
+
         if (ret<0)
             throw std::system_error(errno, std::generic_category());
     }
 
-    std::string Addr(){
+    std::string Addr() const {
         return m_addr.Addr();
     }
 
-    uint16_t Port(){
+    uint16_t Port() const {
         return m_addr.Port();
     }
 
