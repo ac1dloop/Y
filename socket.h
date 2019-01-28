@@ -513,18 +513,17 @@ protected:
 template<int T>
 struct UDPSocket{
 
-    UDPSocket(){
-        m_sock=socket(T, SOCK_DGRAM, IPPROTO_UDP);
-    }
+    UDPSocket():m_sock(socket(T, SOCK_DGRAM, IPPROTO_UDP)) { }
 
-    UDPSocket(const std::string& add, const uint16_t& port):m_addr(add, port){
-        m_sock=socket(T, SOCK_DGRAM, IPPROTO_UDP);
-    }
+    UDPSocket(const std::string& add, const uint16_t& port):m_addr(add, port),
+                                                            m_sock(socket(T, SOCK_DGRAM, IPPROTO_UDP)) { }
+
+
+    /* constructor expects string such as "192.168.0.199:1234" */
 
     UDPSocket(const std::string &add):m_addr(add.substr(0, add.rfind(':')),
-                                             std::stoul(add.substr(add.rfind(':')+1, add.size())) ){
-        m_sock=socket(T, SOCK_DGRAM, IPPROTO_UDP);
-    }
+                                             std::stoul(add.substr(add.rfind(':')+1, add.size())) ),
+                                      m_sock(socket(T, SOCK_DGRAM, IPPROTO_UDP)){ }
 
     UDPSocket(const UDPSocket& op2){
         m_sock=op2.m_sock;
@@ -532,7 +531,7 @@ struct UDPSocket{
     }
 
     UDPSocket(UDPSocket&& op2){
-        m_sock=op2.m_sock;
+        std::swap(m_sock, op2.m_sock);
         std::swap(m_addr, op2.m_addr);
     }
 
@@ -599,7 +598,7 @@ struct UDPSocket{
         if (!msg.empty()){
             int ret=sendto(m_sock, msg.c_str(), msg.size(), 0, &target, target.socklen);
             if (ret==-1){
-                throw std::system_error(errno, std::generic_category());
+                state=false;
             }
         }
     }
@@ -617,12 +616,12 @@ struct UDPSocket{
         std::string recv_str="";
         ip_addr<T> client;
         int ret=0;
-        memset(recv_buffer, 0, sizeof(recv_buffer));
+//        memset(recv_buffer, 0, sizeof(recv_buffer));
         ret=recvfrom(m_sock, recv_buffer, sizeof(recv_buffer), 0, &client, &client.socklen);
         recv_str.append(recv_buffer);
 
         if (ret<0)
-            throw std::system_error(errno, std::generic_category());
+            state=false;
 
         return std::make_pair(recv_str, client);
     }
@@ -636,12 +635,14 @@ struct UDPSocket{
             ret=recvfrom(m_sock, recv_buffer, sizeof(recv_buffer), 0, &client, &client.socklen);
             recv_str.append(recv_buffer);
             if (ret==0){
+                state=false;
                 break;
             } else if (recv_str.size()>=delim.size()&&
                        recv_str.substr(recv_str.size()-delim.size(), recv_str.size())==delim){
                 break;
             } else if (ret==-1){
-                throw std::system_error(errno, std::generic_category());
+                state=false;
+                break;
             }
         }
         return std::make_pair(recv_str, client);
@@ -653,7 +654,8 @@ struct UDPSocket{
         for (;toWrite!=0;){
             ret=sendto(m_sock, buff+ret, toWrite, 0, &m_addr, m_addr.socklen);
             if (ret==-1){
-                throw std::system_error(errno,std::generic_category());
+                state=false;
+                break;
             }
             toWrite-=ret;
         }
@@ -665,7 +667,8 @@ struct UDPSocket{
         for (;toWrite!=0;){
             ret=sendto(m_sock, buff+ret, toWrite, 0, &target, target.socklen);
             if (ret==-1){
-                throw std::system_error(errno,std::generic_category());
+                state=false;
+                break;
             }
             toWrite-=ret;
         }
@@ -678,9 +681,11 @@ struct UDPSocket{
         for (;toRead!=0;){
             ret=recvfrom(m_sock, buff+ret, toRead, 0, &client, &client.socklen);
             if (ret==0){
+                state=false;
                 break;
             } else if (ret==-1){
-                throw std::system_error(errno,std::generic_category());
+                state=false;
+                break;
             }
             toRead-=ret;
         }
@@ -690,7 +695,8 @@ struct UDPSocket{
 
     void Close(){
         int ret=close(m_sock);
-        if (ret<0)
+
+        if (ret<0&&state)
             throw std::system_error(errno, std::generic_category());
     }
 
@@ -702,7 +708,7 @@ struct UDPSocket{
         return m_addr.Port();
     }
 
-    bool state;
+    bool state{true};
 
 protected:
     ip_addr<T> m_addr;
