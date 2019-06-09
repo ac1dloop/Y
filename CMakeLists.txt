@@ -2,15 +2,13 @@ cmake_minimum_required(VERSION 2.8)
 
 project(socket)
 
-set(CMAKE_CXX_FLAGS "-pthread -std=c++11")
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
-add_executable(${PROJECT_NAME} "main.cpp")
+find_package(Threads REQUIRED)
 
-INCLUDE_DIRECTORIES("/home/a/cereal/include/")
+add_executable(tcp_srv "examples/tcp_srv.cpp")
+target_link_libraries(tcp_srv ${CMAKE_THREAD_LIBS_INIT})
 
-add_executable("client_test" "examples/client.cpp")
-add_executable("echo_server" "examples/server.cpp")
-add_executable("udpsrv" "examples/udpsrv.cpp")
-add_executable("udpcli" "examples/udpcli.cpp")
-add_executable("srv_custom" "examples/telnet.cpp")
-add_executable("srv_struct_test" "recv_struct_srv.cpp")
+add_executable(tcp_select "examples/tcp_select.cpp")
