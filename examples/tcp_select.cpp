@@ -17,6 +17,7 @@ enum sock_purpose {
 
 std::pair<TCPSocket4, sock_purpose> p;
 
+template <typename T>
 struct Select {
 
     Select(){
@@ -24,9 +25,7 @@ struct Select {
         FD_ZERO(&workset);
     }
 
-    void Add(const TCPSocket4& sock){
-
-        cout << "added socket: " << sock.m_sock << "\n";
+    void Add(const T& sock){
 
         socket_pool.push_back(sock);
         FD_SET(sock.m_sock, &allset);
@@ -34,20 +33,16 @@ struct Select {
             fdmax=sock.m_sock;
     }
 
-    vector<TCPSocket4*> Ready(){
-
-        cout << "inside ready\n";
+    vector<T*> Ready(){
 
         workset=allset;
 
-        cout << "selecting\n";
         int ret=select(fdmax+1, &workset, nullptr, nullptr, nullptr);
         if (ret<0)
             throw std::system_error(errno, std::system_category());
 
-        cout << "selected\n";
-        vector<TCPSocket4*> res;
-        for (TCPSocket4& x: socket_pool){
+        vector<T*> res;
+        for (T& x: socket_pool){
             if (FD_ISSET(x.m_sock, &workset)){
                 res.push_back(&x);
             }
@@ -56,8 +51,8 @@ struct Select {
         return res;
     }
 
-    void Remove(const TCPSocket4& sock){
-        socket_pool.erase(std::find_if(socket_pool.begin(), socket_pool.end(), [&sock](TCPSocket4& op){
+    void Remove(const T& sock){
+        socket_pool.erase(std::find_if(socket_pool.begin(), socket_pool.end(), [&sock](T& op){
                               return op.m_sock==sock.m_sock;
         }));
 
@@ -66,12 +61,12 @@ struct Select {
 
     int fdmax{-1};
     fd_set allset, workset;
-    vector<TCPSocket4> socket_pool;
+    vector<T> socket_pool;
 };
 
 int main(void)
 {
-    Select sel;
+    Select<TCPSocket4> sel;
 
     TCPSocket4 sock("0.0.0.0", 9999);
 
@@ -102,12 +97,14 @@ int main(void)
 
             str=x->readStr("\r\n");
 
-            if (str.empty())
+            if (str.empty()){
+                x->Shutdown();
                 sel.Remove(*x);
-            else {
-                cout << "read: " << str << "\n";
-                x->writeStr(str);
+                continue;
             }
+
+            cout << "read: " << str << "\n";
+            x->writeStr(str);
         }
     }
 

@@ -8,7 +8,7 @@ using namespace Y;
 using TCPSocket4 = Socket<family::ipv4, socktype::stream>;
 using TCPSocket6 = Socket<family::ipv6, socktype::stream>;
 
-void process_conn(TCPSocket6 sock){
+void process_conn(TCPSocket4 sock){
     std::string str;
 
     for (;sock.state;){
@@ -16,6 +16,8 @@ void process_conn(TCPSocket6 sock){
 
         if (str.empty())
             break;
+
+        cout << "recvd: " << str.substr(0, str.size()-2) << "\n";
 
         sock.writeStr(str);
     }
@@ -27,13 +29,17 @@ void process_conn(TCPSocket6 sock){
 
 int main(int argc, char *argv[])
 {
-    TCPSocket6 sock("::", 9999);
+    TCPSocket4 sock("0.0.0.0", 9999);
 
-    sock.Bind();
-    sock.Listen();
+    try {
+        sock.Bind();
+        sock.Listen();
+    } catch (std::exception& e){
+        cout << e.what() << "\n";
+    }
 
     for (;sock.state;){
-        TCPSocket6 client=sock.Accept();
+        TCPSocket4 client=sock.Accept();
 
         thread t(process_conn, client);
         if (t.joinable())
