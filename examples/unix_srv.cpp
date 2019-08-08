@@ -1,18 +1,19 @@
 #include <iostream>
 #include <socket.h>
-#include <thread>
 
 using namespace std;
 using namespace Y;
 
-using TCPSocket4 = Socket<family::ipv4, socktype::stream>;
-using TCPSocket6 = Socket<family::ipv6, socktype::stream>;
-
-void process_conn(TCPSocket4 sock){
+void process_conn(UnixTCPSocket sock){
     std::string str;
 
     for (;sock.state;){
-        str=sock.readStr("\r\n");
+        try {
+            str=sock.readStr("\r\n");
+        } catch (std::exception& e){
+            cout << "error: " << e.what() << '\n';
+            break;
+        }
 
         if (str.empty())
             break;
@@ -24,12 +25,18 @@ void process_conn(TCPSocket4 sock){
 
     cout << "closed connection\n";
 
-    sock.Close(2);
+    sock.Close();
 }
-
 int main(int argc, char *argv[])
 {
-    TCPSocket4 sock("0.0.0.0", 9999);
+    if (argc!=2){
+        cout << "usage " << argv[0] << " [pathname]\n";
+        return -1;
+    }
+
+    UnixTCPSocket sock(argv[1]);
+
+    cout << "using path: " << sock.Path() << endl;
 
     try {
         sock.Bind();
@@ -39,14 +46,14 @@ int main(int argc, char *argv[])
     }
 
     for (;sock.state;){
-        TCPSocket4 client=sock.Accept();
+        auto client=sock.Accept();
 
         thread t(process_conn, client);
         if (t.joinable())
             t.detach();
     }
 
-    sock.Shutdown();
+    sock.Close();
 
     return 0;
 }
