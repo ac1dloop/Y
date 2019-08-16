@@ -20,9 +20,6 @@
 #include <iostream>
 
 /* TO DO
- * Read Write interface -|
- *                       |> inheritance work
- * Socket interface -----|
  * raw sockets (probably packet class) */
 
 #define MAX_BUF_LINE 256
@@ -300,7 +297,7 @@ struct ip_addr<family::local>{
     }
 
     std::string Path(){
-        return std::string(m_addr.sun_path);
+        return std::string(m_addr.sun_path, strlen(m_addr.sun_path));
     }
 
     sockaddr* operator&() { return reinterpret_cast<sockaddr*>(&m_addr); }
@@ -440,19 +437,129 @@ private:
     sockaddr_in6 m_addr;
 };
 
+struct RW_Interface {
+
+    std::string readStr(const std::string delim="\r\n"){
+        ssize_t ret=0;
+        std::string res="";
+        char buf[MAX_BUF_LINE]{0};
+        for (;;){
+            ret=recv(m_sock, buf, MAX_BUF_LINE, MSG_PEEK);
+
+            if (ret<0){
+                throw std::system_error(errno, std::system_category());
+            }
+
+            if (ret==0){
+                break;
+            }
+
+            std::string tmp(buf, ret);
+
+            size_t d=tmp.find(delim);
+
+            if (d==std::string::npos){
+                res+=tmp;
+
+                recv(m_sock, buf, ret, 0);
+                continue;
+            } else {
+                res+=tmp.substr(0, d+delim.size());
+
+                recv(m_sock, buf, d+delim.size(), 0);
+
+                break;
+            }
+        }
+
+        return res;
+    }
+
+    void writeStr(const std::string& msg){
+        ssize_t ret=0;
+        size_t pos=0;
+        size_t toWrite=msg.size();
+        for (;toWrite!=0;){
+
+            ret=send(m_sock, msg.data()+pos, toWrite, 0);
+
+            if (ret<0){
+                throw std::system_error(errno, std::system_category());
+            }
+
+            pos+=static_cast<size_t>(ret);
+            toWrite-=static_cast<size_t>(ret);
+        }
+    }
+
+    void writePOD(char* buff, size_t sz){
+        int ret=0;
+        for (size_t toWrite=sz;toWrite!=0;toWrite-=ret){
+            ret=send(m_sock, buff+ret, toWrite, 0);
+            if (ret<0)
+                throw std::system_error(errno, std::system_category());
+
+        }
+    }
+
+    void readPOD(char* buff, unsigned sz){
+        int ret=0;
+        for (unsigned toRead=sz;toRead!=0;toRead-=ret){
+            ret=recv(m_sock, buff+ret, toRead, 0);
+            if (ret==0){
+                return;
+            } else if (ret==-1){
+                throw std::system_error(errno, std::system_category());
+            }
+        }
+    }
+
+    sockfd m_sock;
+};
+
 template <family f, socktype t>
 struct Socket {
 };
 
 /* ---------- UNIX TCP---------- */
 template <>
-struct Socket<family::local, socktype::stream> {
-    explicit Socket(){}
+struct Socket<family::local, socktype::stream>:RW_Interface {
 
-    Socket(const char* path):
-        m_sock(socket(family::local, socktype::stream, 0)),
-        m_addr(path)
-    {}
+    Socket()=default;
+
+    Socket(const char* path){
+        m_sock=socket(family::local, socktype::stream, 0);
+        m_addr=ip_addr<family::local>(path);
+    }
+
+    Socket(const std::string& path){
+        m_sock=socket(family::local, socktype::stream, 0);
+        m_addr=ip_addr<family::local>(path.c_str());
+    }
+
+    Socket(const Socket& op2){
+        m_sock=op2.m_sock;
+        m_addr=op2.m_addr;
+    }
+
+    Socket(Socket&& op2){
+        std::swap(m_sock, op2.m_sock);
+        std::swap(m_addr, op2.m_addr);
+    }
+
+    Socket& operator=(const Socket& op2){
+        m_sock=op2.m_sock;
+        m_addr=op2.m_addr;
+
+        return *this;
+    }
+
+    Socket& operator=(Socket&& op2){
+        std::swap(m_sock, op2.m_sock);
+        std::swap(m_addr, op2.m_addr);
+
+        return *this;
+    }
 
     void Bind(){
         unlink(m_addr.Path().c_str());
@@ -500,135 +607,39 @@ struct Socket<family::local, socktype::stream> {
             throw std::system_error(errno, std::system_category());
     }
 
-    std::string readStr(const std::string delim="\r\n"){
-        ssize_t ret=0;
-        std::string res="";
-        char buf[MAX_BUF_LINE]{0};
-        for (;;){
-
-            /* just take a look at the data */
-            ret=recv(m_sock, buf, MAX_BUF_LINE, MSG_PEEK);
-
-            /* system error for sure */
-            if (ret<0){
-                state=false;
-                throw std::system_error(errno, std::system_category());
-            }
-
-            /* Connection closed??? */
-            if (ret==0){
-                state=false;
-                break;
-            }
-
-            /* tmp string that has been read */
-            std::string tmp(buf, ret);
-
-    //        cout << "tmp: " << tmp << " ret: " << ret << "\n";
-
-            /* check if contains delim */
-            size_t d=tmp.find(delim);
-
-            /* delim is not found yet */
-            if (d==std::string::npos){
-
-    //            cout << "no delim found\n";
-
-                /* append new data to result */
-                res+=tmp;
-
-                /* remove data from socket */
-                recv(m_sock, buf, ret, 0);
-                continue;
-            } else {
-
-    //            cout << "delim found\n";
-
-                /* append new data with delim to result */
-                res+=tmp.substr(0, d+delim.size());
-
-                /* remove data before delim and delim */
-                recv(m_sock, buf, d+delim.size(), 0);
-
-                break;
-            }
-        }
-
-        return res;
-    }
-
-    void writeStr(const std::string& msg){
-        ssize_t ret=0;
-        size_t pos=0;
-        size_t toWrite=msg.size();
-        for (;toWrite!=0;){
-
-            ret=send(m_sock, msg.data()+pos, toWrite, 0);
-
-            if (ret<0){
-                state=false;
-                throw std::system_error(errno, std::system_category());
-            }
-
-            pos+=static_cast<size_t>(ret);
-            toWrite-=static_cast<size_t>(ret);
-        }
-    }
-
-    void writePOD(char* buff, size_t sz){
-        int ret=0;
-        for (size_t toWrite=sz;toWrite!=0;toWrite-=ret){
-            ret=send(m_sock, buff+ret, toWrite, 0);
-            if (ret<0)
-                throw std::system_error(errno, std::system_category());
-
-        }
-    }
-
-    void readPOD(char* buff, size_t sz){
-        int ret=0;
-        for (size_t toRead=sz;toRead!=0;toRead-=ret){
-            ret=recv(m_sock, buff+ret, toRead, 0);
-            if (ret==0){
-                return;
-            } else if (ret==-1){
-                throw std::system_error(errno, std::system_category());
-            }
-        }
-    }
-
     void Close(){
-        int ret=close(m_sock);
+        if (close(m_sock)<0){
+            throw std::system_error(errno, std::system_category());
+        }
     }
 
     std::string Path(){ return m_addr.Path(); }
 
     bool state{true};
-    sockfd m_sock;
     ip_addr<family::local> m_addr;
 };
 
 /* ---------- TCP 4/6 ---------- */
 
 template <family f>
-struct Socket<f, socktype::stream> {
+struct Socket<f, socktype::stream>: RW_Interface {
 
     explicit Socket(){}
 
-    Socket(const char* addr, const uint16_t port):
-        m_sock(socket(f, socktype::stream, ipproto::tcp)),
-        m_addr(std::move(ip_addr<f>(addr, port)))
-    {}
+    Socket(const char* addr, const uint16_t port){
+        m_sock = socket(f, socktype::stream, ipproto::tcp);
+        m_addr=ip_addr<f>(addr, port);
+    }
 
-    Socket(const Socket& op2):
-        m_sock(op2.m_sock),
-        m_addr(op2.m_addr)
-    {}
+    Socket(const Socket& op2){
+        m_addr=op2.m_addr;
+        m_sock=op2.m_sock;
+    }
 
-    Socket(Socket&& op2):
-        m_sock(std::move(op2.m_sock)),
-        m_addr(std::move(op2.m_addr))
-    {}
+    Socket(Socket&& op2){
+        std::swap(m_sock, op2.m_sock);
+        std::swap(m_addr, op2.m_addr);
+    }
 
     Socket& operator=(const Socket& op2){
         this->m_sock=op2.m_sock;
@@ -701,143 +712,6 @@ struct Socket<f, socktype::stream> {
             throw std::system_error(errno, std::system_category());
     }
 
-    /**
-     * @brief readStr
-     * @param delim
-     * @return string including delimeter character
-     * Extremely slow implementation. Use only for fun.
-     */
-    std::string readStr(const char delim='\n'){
-        ssize_t ret=0;
-
-        std::string res="";
-        char buf{0};
-        for (;;){
-
-            ret=recv(m_sock, &buf, 1, 0);
-
-            if (ret==-1){
-                state=false;
-                throw std::system_error(errno, std::system_category());
-            }
-
-            /* Connection closed??? */
-            if (ret==0){
-                state=false;
-                break;
-            }
-
-            res+=buf;
-            if (buf==delim)
-                break;
-        }
-
-        return res;
-    }
-
-    /**
-     * @brief readStr
-     * @param delim
-     * @return string including delimeter
-     * Nice for trivial text protocols like telnet.
-     */
-    std::string readStr(const std::string delim="\r\n"){
-        ssize_t ret=0;
-        std::string res="";
-        char buf[MAX_BUF_LINE]{0};
-        for (;;){
-
-            /* just take a look at the data */
-            ret=recv(m_sock, buf, MAX_BUF_LINE, MSG_PEEK);
-
-            /* system error for sure */
-            if (ret<0){
-                state=false;
-                throw std::system_error(errno, std::system_category());
-            }
-
-            /* Connection closed??? */
-            if (ret==0){
-                state=false;
-                break;
-            }
-
-            /* tmp string that has been read */
-            std::string tmp(buf, ret);
-
-    //        cout << "tmp: " << tmp << " ret: " << ret << "\n";
-
-            /* check if contains delim */
-            size_t d=tmp.find(delim);
-
-            /* delim is not found yet */
-            if (d==std::string::npos){
-
-    //            cout << "no delim found\n";
-
-                /* append new data to result */
-                res+=tmp;
-
-                /* remove data from socket */
-                recv(m_sock, buf, ret, 0);
-                continue;
-            } else {
-
-    //            cout << "delim found\n";
-
-                /* append new data with delim to result */
-                res+=tmp.substr(0, d+delim.size());
-
-                /* remove data before delim and delim */
-                recv(m_sock, buf, d+delim.size(), 0);
-
-                break;
-            }
-        }
-
-        return res;
-    }
-
-    void writeStr(const std::string& msg){
-        ssize_t ret=0;
-        size_t pos=0;
-        size_t toWrite=msg.size();
-        for (;toWrite!=0;){
-
-            ret=send(m_sock, msg.data()+pos, toWrite, 0);
-
-            if (ret<0){
-                state=false;
-                throw std::system_error(errno, std::system_category());
-            }
-
-            pos+=static_cast<size_t>(ret);
-            toWrite-=static_cast<size_t>(ret);
-        }
-    }
-
-    void writePOD(char* buff, size_t sz){
-        int ret=0;
-        for (size_t toWrite=sz;toWrite!=0;toWrite-=ret){
-            ret=send(m_sock, buff+ret, toWrite, 0);
-            if (ret<0)
-                throw std::system_error(errno, std::system_category());
-
-        }
-    }
-
-    void readPOD(char* buff, size_t sz){
-        int ret=0;
-        for (size_t toRead=sz;toRead!=0;toRead-=ret){
-            ret=recv(m_sock, buff+ret, toRead, 0);
-            if (ret==0){
-                return;
-            } else if (ret==-1){
-                throw std::system_error(errno, std::system_category());
-            }
-        }
-    }
-
     void Shutdown(shut how=shut::rw)
     {
         int ret=shutdown(m_sock, how);
@@ -884,8 +758,8 @@ struct Socket<f, socktype::stream> {
     bool state{true};
 
     int fd(){ return m_sock; }
+
 private:
-    sockfd m_sock;
     ip_addr<f> m_addr;
 };
 
@@ -996,46 +870,30 @@ struct Socket<f, socktype::datagram> {
         ip_addr<f> client;
         char buf[MAX_BUF_LINE]{0};
         for (;;){
-
-            /* just take a look at the data */
             ret=recvfrom(m_sock, buf, MAX_BUF_LINE, MSG_PEEK, &client, &client.socklen);
 
-            /* system error for sure */
             if (ret<0){
                 state=false;
                 throw std::system_error(errno, std::system_category());
             }
 
-            /* Connection closed??? */
             if (ret==0){
                 state=false;
                 break;
             }
 
-            /* tmp string that has been read */
             std::string tmp(buf, ret);
-    //        cout << "tmp: " << tmp << " ret: " << ret << "\n";
 
-            /* check if contains delim */
             size_t d=tmp.find(delim);
 
-            /* delim is not found yet */
             if (d==std::string::npos){
-    //            cout << "no delim found\n";
-
-                /* append new data to result */
                 res+=tmp;
 
-                /* remove data from socket */
                 recv(m_sock, buf, ret, 0);
                 continue;
             } else {
-    //            cout << "delim found\n";
-
-                /* append new data with delim to result */
                 res+=tmp.substr(0, d+delim.size());
 
-                /* remove data before delim and delim */
                 recvfrom(m_sock, buf, d+delim.size(), 0, &client, &client.socklen);
 
                 break;
@@ -1099,57 +957,6 @@ struct Socket<f, socktype::datagram> {
 private:
     sockfd m_sock;
     ip_addr<f> m_addr;
-};
-
-template <typename T>
-/**
- * @brief The Select struct
- * Simple select call wrapper
- */
-struct Select {
-
-    Select(){
-        FD_ZERO(&allset);
-        FD_ZERO(&workset);
-    }
-
-    void Add(const T& sock){
-
-        socket_pool.push_back(sock);
-        FD_SET(sock.m_sock, &allset);
-        if (sock.m_sock>fdmax)
-            fdmax=sock.m_sock;
-    }
-
-    std::vector<T*> Ready(){
-
-        workset=allset;
-
-        int ret=select(fdmax+1, &workset, nullptr, nullptr, nullptr);
-        if (ret<0)
-            throw std::system_error(errno, std::system_category());
-
-        std::vector<T*> res;
-        for (T& x: socket_pool){
-            if (FD_ISSET(x.m_sock, &workset)){
-                res.push_back(&x);
-            }
-        }
-
-        return res;
-    }
-
-    void Remove(const T& sock){
-        socket_pool.erase(std::find_if(socket_pool.begin(), socket_pool.end(), [&sock](T& op){
-                              return op.m_sock==sock.m_sock;
-        }));
-
-        FD_CLR(sock.m_sock, &allset);
-    }
-
-    int fdmax{-1};
-    fd_set allset, workset;
-    std::vector<T> socket_pool;
 };
 
 using msg_host4=std::pair<std::string, ip_addr<ipv4>>;
