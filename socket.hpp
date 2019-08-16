@@ -514,6 +514,9 @@ struct RW_Interface {
         }
     }
 
+    int fd(){ return m_sock; }
+
+protected:
     sockfd m_sock;
 };
 
@@ -756,8 +759,6 @@ struct Socket<f, socktype::stream>: RW_Interface {
     }
 
     bool state{true};
-
-    int fd(){ return m_sock; }
 
 private:
     ip_addr<f> m_addr;
