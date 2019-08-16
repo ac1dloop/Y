@@ -34,8 +34,7 @@ int main(int argc, char *argv[])
 //        return -1;
 //    }
 
-    TCPSocket4 s1("0.0.0.0", 10001);
-    UnixTCPSocket sock("/tmp/mtusrv.sock");
+    UnixTCPSocket sock=UnixTCPSocket("/tmp/mtusrv.sock");
 
     cout << "using path: " << sock.Path() << endl;
 

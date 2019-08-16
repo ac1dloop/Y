@@ -256,6 +256,17 @@ template <family T>
 struct ip_addr{
 };
 
+using std::cout;
+
+auto printSunPath = [](const char* str){
+    cout << "sunpath: ";
+
+    for (unsigned i=0;i<108;++i){
+        cout << (int)str[i] << ' ' << str[i] << ' ';
+    }
+    cout << std::endl;
+};
+
 template <>
 struct ip_addr<family::local>{
 
@@ -273,17 +284,19 @@ struct ip_addr<family::local>{
     ip_addr(const ip_addr& op2){
         socklen=op2.socklen;
         strcpy(m_addr.sun_path, op2.m_addr.sun_path);
+        m_addr.sun_family=op2.m_addr.sun_family;
     }
 
     ip_addr(ip_addr&& op2){
         std::swap(socklen, op2.socklen);
         std::swap(m_addr.sun_path, op2.m_addr.sun_path);
-//        memmove(m_addr.sun_path, op2.m_addr.sun_path, sizeof(op2.m_addr.sun_path));
+        std::swap(m_addr.sun_family, op2.m_addr.sun_family);
     }
 
     ip_addr& operator=(const ip_addr& op2){
         socklen=op2.socklen;
         strcpy(m_addr.sun_path, op2.m_addr.sun_path);
+        m_addr.sun_family=op2.m_addr.sun_family;
 
         return *this;
     }
@@ -291,7 +304,7 @@ struct ip_addr<family::local>{
     ip_addr& operator=(ip_addr&& op2){
         std::swap(socklen, op2.socklen);
         std::swap(m_addr.sun_path, op2.m_addr.sun_path);
-//        memmove(m_addr.sun_path, op2.m_addr.sun_path, sizeof(op2.m_addr.sun_path));
+        std::swap(m_addr.sun_family, op2.m_addr.sun_family);
 
         return *this;
     }
@@ -524,6 +537,8 @@ template <family f, socktype t>
 struct Socket {
 };
 
+using std::cout;
+
 /* ---------- UNIX TCP---------- */
 template <>
 struct Socket<family::local, socktype::stream>:RW_Interface {
@@ -541,6 +556,7 @@ struct Socket<family::local, socktype::stream>:RW_Interface {
     }
 
     Socket(const Socket& op2){
+
         m_sock=op2.m_sock;
         m_addr=op2.m_addr;
     }
