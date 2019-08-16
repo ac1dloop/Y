@@ -1,5 +1,5 @@
 #include <iostream>
-#include <socket.h>
+#include <socket.hpp>
 
 using namespace std;
 using namespace Y;
@@ -29,21 +29,22 @@ void process_conn(UnixTCPSocket sock){
 }
 int main(int argc, char *argv[])
 {
-    if (argc!=2){
-        cout << "usage " << argv[0] << " [pathname]\n";
-        return -1;
-    }
+//    if (argc!=2){
+//        cout << "usage " << argv[0] << " [pathname]\n";
+//        return -1;
+//    }
 
-    UnixTCPSocket sock(argv[1]);
+    TCPSocket4 s1("0.0.0.0", 10001);
+    UnixTCPSocket sock("/tmp/mtusrv.sock");
 
     cout << "using path: " << sock.Path() << endl;
 
-    try {
+//    try {
         sock.Bind();
         sock.Listen();
-    } catch (std::exception& e){
-        cout << e.what() << "\n";
-    }
+//    } catch (std::exception& e){
+//        cout << e.what() << "\n";
+//    }
 
     for (;sock.state;){
         auto client=sock.Accept();

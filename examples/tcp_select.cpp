@@ -1,6 +1,6 @@
 #include <iostream>
 #include <sys/select.h>
-#include <socket.h>
+#include <socket.hpp>
 #include <vector>
 #include <algorithm>
 
@@ -28,8 +28,8 @@ struct Select {
     void Add(const T& sock){
 
         socket_pool.push_back(sock);
-        FD_SET(sock.m_sock, &allset);
-        if (sock.m_sock>fdmax)
+        FD_SET(sock.fd(), &allset);
+        if (sock.fd()>fdmax)
             fdmax=sock.m_sock;
     }
 

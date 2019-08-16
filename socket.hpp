@@ -253,6 +253,8 @@ private:
     int m_fd{-1};
 };
 
+
+
 template <family T>
 struct ip_addr{
 };
@@ -442,7 +444,7 @@ template <family f, socktype t>
 struct Socket {
 };
 
-/* ---------- UNIX ---------- */
+/* ---------- UNIX TCP---------- */
 template <>
 struct Socket<family::local, socktype::stream> {
     explicit Socket(){}
@@ -881,7 +883,8 @@ struct Socket<f, socktype::stream> {
 
     bool state{true};
 
-//private:
+    int fd(){ return m_sock; }
+private:
     sockfd m_sock;
     ip_addr<f> m_addr;
 };
