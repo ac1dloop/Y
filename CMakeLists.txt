@@ -18,8 +18,8 @@ find_package(Threads REQUIRED)
 
 #add_executable(rule5 "tests/check_rule5.cpp")
 
-#add_executable(unix_cli "examples/unix_cli.cpp")
-#target_link_libraries(unix_cli ${CMAKE_THREAD_LIBS_INIT})
+add_executable(unix_cli "examples/unix_cli.cpp")
+target_link_libraries(unix_cli ${CMAKE_THREAD_LIBS_INIT})
 
 add_executable(unix_srv "examples/unix_srv.cpp")
 target_link_libraries(unix_srv ${CMAKE_THREAD_LIBS_INIT})

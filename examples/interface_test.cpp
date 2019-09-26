@@ -8,10 +8,10 @@ using namespace Y;
 using TCPSocket4 = Socket<family::ipv4, socktype::stream>;
 using TCPSocket6 = Socket<family::ipv6, socktype::stream>;
 
-void process_conn(UnixTCPSocket sock){
+void process_conn(RW_Interface sock){
     std::string str;
 
-    for (;sock.state;){
+    for (;;){
         str=sock.readStr("\r\n");
 
         if (str.empty())
@@ -24,7 +24,7 @@ void process_conn(UnixTCPSocket sock){
 
     cout << "closed connection\n";
 
-    sock.Close();
+    close(sock.fd());
 }
 
 int main(int argc, char *argv[])

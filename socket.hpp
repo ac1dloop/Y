@@ -458,6 +458,7 @@ struct RW_Interface {
         char buf[MAX_BUF_LINE]{0};
         for (;;){
             ret=recv(m_sock, buf, MAX_BUF_LINE, MSG_PEEK);
+            cout << "ret:" << ret << " res:" << res << '\n';
 
             if (ret<0){
                 throw std::system_error(errno, std::system_category());
@@ -467,21 +468,17 @@ struct RW_Interface {
                 break;
             }
 
-            std::string tmp(buf, ret);
-
-            size_t d=tmp.find(delim);
+            res.append(buf, ret);
+            size_t d=res.find(delim);
 
             if (d==std::string::npos){
-                res+=tmp;
-
                 recv(m_sock, buf, ret, 0);
-                continue;
             } else {
-                res+=tmp.substr(0, d+delim.size());
+                std::string tmp(buf, ret);
 
-                recv(m_sock, buf, d+delim.size(), 0);
+                recv(m_sock, buf, tmp.find(delim)+2, 0);
 
-                break;
+                return res.substr(0, d+delim.size());
             }
         }
 
@@ -528,6 +525,10 @@ struct RW_Interface {
     }
 
     int fd(){ return m_sock; }
+
+    void Close(){
+        close(m_sock);
+    }
 
 protected:
     sockfd m_sock;
