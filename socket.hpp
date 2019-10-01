@@ -12,15 +12,19 @@
 #include <cstring> //strlen, memset
 #include <netdb.h>
 
-/* for Select struct */
 #include <vector>
-#include <algorithm>
-#include <sys/select.h>
 
 #include <iostream>
 
 /* TO DO
- * raw sockets (probably packet class) */
+ * raw sockets (probably packet class)
+ * provide as library
+ * move definitions to .cpp file
+ * add socket opts
+ * add unix udp
+ * add win support
+ * nothrow #ifdef
+ * inherit from std::stream */
 
 #define MAX_BUF_LINE 256
 
@@ -175,11 +179,6 @@ enum opt_ip6 {
     mtu_path=IPV6_MTU,
 #endif
 };
-
-//enum opt_tcp {
-//    max_segment=TCP_MAXSEG,
-//    nodelay=TCP_NODELAY
-//};
 
 enum class errtypes {
     descriptor,
@@ -452,6 +451,23 @@ private:
 
 struct RW_Interface {
 
+    void operator<<(const std::string& s){
+        writeStr(s+"\r\n");
+    }
+
+    void operator>>(std::string& s){
+        s=readStr("\r\n");
+        s=s.substr(0, s.size()-2);
+    }
+
+    void operator<<(const std::vector<char>& vec){
+        writePOD(vec.data(), vec.size());
+    }
+
+    void operator>>(std::vector<char>& vec){
+        readPOD(vec.data(), vec.size());
+    }
+
     std::string readStr(const std::string delim="\r\n"){
         ssize_t ret=0;
         std::string res="";
@@ -502,7 +518,7 @@ struct RW_Interface {
         }
     }
 
-    void writePOD(char* buff, size_t sz){
+    void writePOD(const char* const buff, size_t sz){
         int ret=0;
         for (size_t toWrite=sz;toWrite!=0;toWrite-=ret){
             ret=send(m_sock, buff+ret, toWrite, 0);
