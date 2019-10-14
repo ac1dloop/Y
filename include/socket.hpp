@@ -20,14 +20,13 @@
  * raw sockets (probably packet class)
  * provide as library
  * move definitions to .cpp file
- * add socket opts
- * add unix udp
  * add win support
  * nothrow #ifdef
  * inherit from std::stream
  * add resolve functions */
 
-#define MAX_BUF_LINE 256
+#define MAX_BUF_LINE 256 
+#define UDP_MAX_BUF 1500
 
 namespace Y {
 
@@ -250,8 +249,6 @@ private:
     int m_fd{-1};
 };
 
-
-
 template <family T>
 struct ip_addr{
 };
@@ -263,7 +260,7 @@ struct ip_addr<family::local>{
 
     ip_addr():socklen(sizeof(m_addr)) {}
 
-    explicit ip_addr(const char* path):socklen(sizeof(m_addr)){
+    ip_addr(const char* path):socklen(sizeof(m_addr)){
         m_addr.sun_family=family::local;
 
         if (strlen(path)>sizeof(m_addr.sun_path))
@@ -316,7 +313,9 @@ template <>
 struct ip_addr<family::ipv4>{
     ip_addr():socklen(sizeof(m_addr)) {}
 
-    explicit ip_addr(const char* addr, uint16_t port){
+    ip_addr(const sockaddr_in addr):m_addr(addr), socklen(sizeof(addr)){}
+
+    ip_addr(const char* addr, uint16_t port){
         int ret;
 
         ret=inet_pton(family::ipv4, addr, &m_addr.sin_addr);
@@ -379,7 +378,9 @@ template <>
 struct ip_addr<family::ipv6>{
     ip_addr():socklen(sizeof(m_addr)) { }
 
-    explicit ip_addr(const char* addr, uint16_t port){
+    ip_addr(const sockaddr_in6& addr):m_addr(addr), socklen(sizeof(addr)){}
+
+    ip_addr(const char* addr, uint16_t port){
         int ret;
 
         ret=inet_pton(family::ipv6, addr, &m_addr.sin6_addr);
@@ -442,7 +443,20 @@ private:
     sockaddr_in6 m_addr;
 };
 
-struct RW_Interface {
+struct FD_Interface {
+
+    void setOpt(opt_socket lvl, opt_socket opt, void* val){
+        int ret=setsockopt(m_sock, lvl, opt, val, sizeof(val));
+
+        if (ret<0)
+            throw std::system_error(errno, std::system_category());
+    }
+
+protected:
+    sockfd m_sock;;
+};
+
+struct RW_Interface: FD_Interface {
 
     void operator<<(const std::string& s){
         writeStr(s+"\r\n");
@@ -467,7 +481,6 @@ struct RW_Interface {
         char buf[MAX_BUF_LINE]{0};
         for (;;){
             ret=recv(m_sock, buf, MAX_BUF_LINE, MSG_PEEK);
-            cout << "ret:" << ret << " res:" << res << '\n';
 
             if (ret<0){
                 throw std::system_error(errno, std::system_category());
@@ -538,9 +551,6 @@ struct RW_Interface {
     void Close(){
         close(m_sock);
     }
-
-protected:
-    sockfd m_sock;
 };
 
 template <family f, socktype t>
@@ -623,10 +633,17 @@ struct Socket<family::local, socktype::stream>:RW_Interface {
         return client;
     }
 
-    void Connect(std::chrono::milliseconds d=std::chrono::milliseconds(3000)){
+    void Connect(){
+        int ret=connect(m_sock, &m_addr, m_addr.socklen);
+
+        if (ret<0)
+            throw std::system_error(errno, std::system_category());
+    }
+
+    void Connect(std::chrono::milliseconds ms){
         int ret;
         std::future<int> fut=std::async(std::launch::async, connect, m_sock, &m_addr, m_addr.socklen);
-        std::future_status status=fut.wait_for(d);
+        std::future_status status=fut.wait_for(ms);
         if (status==std::future_status::timeout)
             throw SocketException(errtypes::timeout);
 
@@ -688,6 +705,12 @@ struct Socket<family::local, socktype::datagram> {
         return *this;
     }
 
+	void Bind(const std::string& path){
+		m_addr=ip_addr<family::local>(path.c_str());
+
+		Bind();
+	}
+
     void Bind(){
         unlink(m_addr.Path().c_str());
 
@@ -697,19 +720,7 @@ struct Socket<family::local, socktype::datagram> {
             throw std::system_error(errno, std::system_category());
     }
 
-    void Connect(std::chrono::milliseconds d=std::chrono::milliseconds(3000)){
-        int ret;
-        std::future<int> fut=std::async(std::launch::async, connect, m_sock, &m_addr, m_addr.socklen);
-        std::future_status status=fut.wait_for(d);
-        if (status==std::future_status::timeout)
-            throw SocketException(errtypes::timeout);
-
-        ret=fut.get();
-        if (ret<0)
-            throw std::system_error(errno, std::system_category());
-    }
-
-    void sendStr(const std::string& msg, ip_addr<family::local>& target){
+    void sendStr(const std::string& msg, ip_addr<local>& target){
         ssize_t ret=0;
         size_t pos=0;
         size_t toWrite=msg.size();
@@ -745,29 +756,15 @@ struct Socket<family::local, socktype::datagram> {
         }
     }
 
-    std::pair<std::string, ip_addr<family::local>> recvAtMost(){
-        std::string res="";
-        ip_addr<family::local> client;
-        int ret=0;
-        char buf[MAX_BUF_LINE]{0};
-
-        ret=recvfrom(m_sock, buf, MAX_BUF_LINE, 0, &client, &client.socklen);
-
-        if (ret<0)
-            throw std::system_error(errno, std::system_category());
-
-        res+=std::string(buf, ret);
-
-        return std::make_pair(res, client);
-    }
-
-    std::pair<std::string, ip_addr<family::local>> recvStr(const std::string& delim="\r\n"){
+    std::pair<std::string, ip_addr<local>> recvStr(const std::string& delim="\r\n"){
         ssize_t ret=0;
         std::string res="";
-        ip_addr<family::local> client;
-        char buf[MAX_BUF_LINE]{0};
+        ip_addr<local> client;
+        char buf[UDP_MAX_BUF]{0};
+
         for (;;){
-            ret=recvfrom(m_sock, buf, MAX_BUF_LINE, MSG_PEEK, &client, &client.socklen);
+            cout << "blocking in recvfrom\n";
+            ret=recvfrom(m_sock, buf, UDP_MAX_BUF, MSG_PEEK, &client, &client.socklen);
 
             if (ret<0){
                 state=false;
@@ -775,29 +772,91 @@ struct Socket<family::local, socktype::datagram> {
             }
 
             if (ret==0){
+                cout << "ret==0\n";
                 state=false;
                 break;
             }
 
-            std::string tmp(buf, ret);
+            res.append(buf, ret);
+            size_t d=res.find(delim);
 
-            size_t d=tmp.find(delim);
+            cout << "ret: " << ret << " res: " << res << '\n';
 
             if (d==std::string::npos){
-                res+=tmp;
-
-                recv(m_sock, buf, ret, 0);
-                continue;
+                cout << "no delim\n";
+                recvfrom(m_sock, buf, ret, 0, &client, &client.socklen);
             } else {
-                res+=tmp.substr(0, d+delim.size());
+                cout << "delim found\n";
+                std::string tmp(buf, ret);
 
-                recvfrom(m_sock, buf, d+delim.size(), 0, &client, &client.socklen);
+                recvfrom(m_sock, buf, tmp.find(delim)+delim.size(), 0, &client, &client.socklen);
 
-                break;
+                return std::make_pair(res.substr(0, d+delim.size()), client);
             }
         }
 
         return std::make_pair(res, client);
+    }
+
+    void sendData(const std::vector<uint8_t>& vec, ip_addr<local>& target){
+        size_t toWrite=vec.size();
+        int ret=0;
+        for (;toWrite!=0;){
+            ret=sendto(m_sock, vec.data()+ret, toWrite, 0, &target, target.socklen);
+
+            if (ret<0){
+                state=false;
+                throw std::system_error(errno, std::system_category());
+            }
+
+            toWrite-=ret;
+        }
+    }
+
+    void sendData(const std::vector<uint8_t>& vec){
+        size_t toWrite=vec.size();
+        int ret=0;
+        for (;toWrite!=0;){
+            ret=sendto(m_sock, vec.data()+ret, toWrite, 0, &m_addr, m_addr.socklen);
+
+            if (ret<0){
+                state=false;
+                throw std::system_error(errno, std::system_category());
+            }
+
+            toWrite-=ret;
+        }
+    }
+
+    std::pair<std::vector<uint8_t>, ip_addr<local>> recvData(const size_t sz){
+        std::vector<uint8_t> res(sz);
+        size_t toRead=sz;
+        ssize_t ret=0;
+        ip_addr<local> client;
+        for (;toRead!=0;){
+            ret=recvfrom(m_sock, res.data()+ret, toRead, 0, &client, &client.socklen);
+
+            if (ret==0){
+                break;
+            } else if (ret<0){
+                throw std::system_error(errno, std::system_category());
+            }
+            toRead-=ret;
+        }
+
+        return std::make_pair(res, client);
+    }
+
+    void sendPOD(char* buff, const size_t& sz, ip_addr<local>& target){
+        size_t toWrite=sz;
+        int ret=0;
+        for (;toWrite!=0;){
+            ret=sendto(m_sock, buff+ret, toWrite, 0, &target, target.socklen);
+            if (ret<0){
+                throw std::system_error(errno, std::system_category());
+            }
+            toWrite-=ret;
+        }
     }
 
     void sendPOD(char* buff, const size_t& sz){
@@ -812,21 +871,9 @@ struct Socket<family::local, socktype::datagram> {
         }
     }
 
-    void sendPOD(char* buff, const size_t& sz, ip_addr<family::local>& target){
-        size_t toWrite=sz;
-        int ret=0;
-        for (;toWrite!=0;){
-            ret=sendto(m_sock, buff+ret, toWrite, 0, &target, target.socklen);
-            if (ret<0){
-                throw std::system_error(errno, std::system_category());
-            }
-            toWrite-=ret;
-        }
-    }
-
-    ip_addr<family::local> recvPOD(char* buff, const size_t& sz){
+    ip_addr<local> recvPOD(char* buff, const size_t& sz){
         size_t toRead=sz;
-        ip_addr<family::local> client;
+        ip_addr<local> client;
         int ret=0;
         for (;toRead!=0;){
             ret=recvfrom(m_sock, buff+ret, toRead, 0, &client, &client.socklen);
@@ -889,13 +936,24 @@ struct Socket<f, socktype::stream>: RW_Interface {
         return *this;
     }
 
+    void Bind(const ip_addr<f>& addr){
+        m_addr=addr;
+
+        Bind();
+    }
+
     void Bind(){
         int val=1;
 
-        int ret=setsockopt(m_sock, opt_socket::level, opt_socket::reuseaddr, &val, sizeof(val));
+//        int ret=setsockopt(m_sock, opt_socket::level, opt_socket::reuseaddr, &val, sizeof(val));
 
-        if (ret==0)
-            ret=bind(m_sock, &m_addr, m_addr.socklen);
+
+        this->setOpt(opt_socket::level, opt_socket::reuseaddr, &val);
+
+        int ret=bind(m_sock, &m_addr, m_addr.socklen);
+
+//        if (ret==0)
+//            ret=bind(m_sock, &m_addr, m_addr.socklen);
 
 
         if (ret<0)
@@ -934,7 +992,7 @@ struct Socket<f, socktype::stream>: RW_Interface {
             throw std::system_error(errno, std::system_category());
     }
 
-    void Connect(std::chrono::milliseconds d=std::chrono::milliseconds(3000)){
+    void Connect(std::chrono::milliseconds d){
         int ret;
         std::future<int> fut=std::async(std::launch::async, connect, m_sock, &m_addr, m_addr.socklen);
         std::future_status status=fut.wait_for(d);
@@ -1039,7 +1097,25 @@ struct Socket<f, socktype::datagram> {
         if (ret==0)
             ret=bind(m_sock, &m_addr, m_addr.socklen);
 
+        if (ret<0)
+            throw std::system_error(errno, std::system_category());
+    }
 
+    void Connect(){
+        int ret=connect(m_sock, &m_addr, m_addr.socklen);
+
+        if (ret<0)
+            throw std::system_error(errno, std::system_category());
+    }
+
+    void Connect(std::chrono::milliseconds d=std::chrono::milliseconds(3000)){
+        int ret;
+        std::future<int> fut=std::async(std::launch::async, connect, m_sock, &m_addr, m_addr.socklen);
+        std::future_status status=fut.wait_for(d);
+        if (status==std::future_status::timeout)
+            throw SocketException(errtypes::timeout);
+
+        ret=fut.get();
         if (ret<0)
             throw std::system_error(errno, std::system_category());
     }
@@ -1080,29 +1156,14 @@ struct Socket<f, socktype::datagram> {
         }
     }
 
-    std::pair<std::string, ip_addr<f>> recvAtMost(){
-        std::string res="";
-        ip_addr<f> client;
-        int ret=0;
-        char buf[MAX_BUF_LINE]{0};
-
-        ret=recvfrom(m_sock, buf, MAX_BUF_LINE, 0, &client, &client.socklen);
-
-        if (ret<0)
-            throw std::system_error(errno, std::system_category());
-
-        res+=std::string(buf, ret);
-
-        return std::make_pair(res, client);
-    }
-
     std::pair<std::string, ip_addr<f>> recvStr(const std::string& delim="\r\n"){
         ssize_t ret=0;
         std::string res="";
         ip_addr<f> client;
-        char buf[MAX_BUF_LINE]{0};
+        char buf[UDP_MAX_BUF]{0};
+
         for (;;){
-            ret=recvfrom(m_sock, buf, MAX_BUF_LINE, MSG_PEEK, &client, &client.socklen);
+            ret=recvfrom(m_sock, buf, UDP_MAX_BUF, MSG_PEEK, &client, &client.socklen);
 
             if (ret<0){
                 state=false;
@@ -1114,37 +1175,70 @@ struct Socket<f, socktype::datagram> {
                 break;
             }
 
-            std::string tmp(buf, ret);
-
-            size_t d=tmp.find(delim);
+            res.append(buf, ret);
+            size_t d=res.find(delim);
 
             if (d==std::string::npos){
-                res+=tmp;
-
-                recv(m_sock, buf, ret, 0);
-                continue;
+                recvfrom(m_sock, buf, ret, 0, &client, &client.socklen);
             } else {
-                res+=tmp.substr(0, d+delim.size());
+                std::string tmp(buf, ret);
 
-                recvfrom(m_sock, buf, d+delim.size(), 0, &client, &client.socklen);
+                recvfrom(m_sock, buf, tmp.find(delim)+delim.size(), 0, &client, &client.socklen);
 
-                break;
+                return std::make_pair(res.substr(0, d+delim.size()), client);
             }
         }
 
         return std::make_pair(res, client);
     }
 
-    void sendPOD(char* buff, const size_t& sz){
-        size_t toWrite=sz;
+    void sendData(const std::vector<uint8_t>& vec, ip_addr<f>& target){
+        size_t toWrite=vec.size();
         int ret=0;
         for (;toWrite!=0;){
-            ret=sendto(m_sock, buff+ret, toWrite, 0, &m_addr, m_addr.socklen);
+            ret=sendto(m_sock, vec.data()+ret, toWrite, 0, &target, target.socklen);
+
             if (ret<0){
+                state=false;
                 throw std::system_error(errno, std::system_category());
             }
+
             toWrite-=ret;
         }
+    }
+
+    void sendData(const std::vector<uint8_t>& vec){
+        size_t toWrite=vec.size();
+        int ret=0;
+        for (;toWrite!=0;){
+            ret=sendto(m_sock, vec.data()+ret, toWrite, 0, &m_addr, m_addr.socklen);
+
+            if (ret<0){
+                state=false;
+                throw std::system_error(errno, std::system_category());
+            }
+
+            toWrite-=ret;
+        }
+    }
+
+    std::pair<std::vector<uint8_t>, ip_addr<f>> recvData(const size_t sz){
+        std::vector<uint8_t> res(sz);
+        size_t toRead=sz;
+        ssize_t ret=0;
+        ip_addr<f> client;
+        for (;toRead!=0;){
+            ret=recvfrom(m_sock, res.data()+ret, toRead, 0, &client, &client.socklen);
+
+            if (ret==0){
+                break;
+            } else if (ret<0){
+                throw std::system_error(errno, std::system_category());
+            }
+            toRead-=ret;
+        }
+
+        return std::make_pair(res, client);
     }
 
     void sendPOD(char* buff, const size_t& sz, ip_addr<f>& target){
@@ -1152,6 +1246,18 @@ struct Socket<f, socktype::datagram> {
         int ret=0;
         for (;toWrite!=0;){
             ret=sendto(m_sock, buff+ret, toWrite, 0, &target, target.socklen);
+            if (ret<0){
+                throw std::system_error(errno, std::system_category());
+            }
+            toWrite-=ret;
+        }
+    }
+
+    void sendPOD(char* buff, const size_t& sz){
+        size_t toWrite=sz;
+        int ret=0;
+        for (;toWrite!=0;){
+            ret=sendto(m_sock, buff+ret, toWrite, 0, &m_addr, m_addr.socklen);
             if (ret<0){
                 throw std::system_error(errno, std::system_category());
             }
@@ -1191,9 +1297,13 @@ private:
     ip_addr<f> m_addr;
 };
 
-using msg_host4=std::pair<std::string, ip_addr<ipv4>>;
-using msg_host6=std::pair<std::string, ip_addr<ipv6>>;
-using msg_unix=std::pair<std::string, ip_addr<family::local>>;
+using ip4_addr=ip_addr<family::ipv4>;
+using ip6_addr=ip_addr<family::ipv6>;
+using un_addr=ip_addr<family::local>;
+
+using msg_host4=std::pair<std::string, ip4_addr>;
+using msg_host6=std::pair<std::string, ip6_addr>;
+using msg_unix=std::pair<std::string, un_addr>;
 
 using TCPSocket4=Socket<family::ipv4, socktype::stream>;
 using UDPSocket4=Socket<family::ipv4, socktype::datagram>;
