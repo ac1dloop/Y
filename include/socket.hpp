@@ -11,6 +11,7 @@
 #include <typeinfo>
 #include <cstring> //strlen, memset
 #include <netdb.h>
+#include <cstring>
 
 #include <vector>
 
@@ -184,6 +185,69 @@ enum class errtypes {
     descriptor,
     timeout,
 };
+
+static std::vector<std::string> getAddrByName(const std::string& hostname, socktype t, const std::string& service_or_port){
+    std::vector<std::string> res;
+
+    addrinfo hints, *result;
+    addrinfo *it;
+
+    memset(&hints, 0, sizeof(hints));
+
+    hints.ai_family=AF_UNSPEC;
+    hints.ai_socktype=t;
+    hints.ai_flags=AI_CANONNAME;
+
+    int ret=getaddrinfo(hostname.c_str(), service_or_port.c_str(), &hints, &result);
+    if (ret!=0){
+        throw std::logic_error(gai_strerror(ret));
+    }
+
+    for (it=result;it!=nullptr;it=it->ai_next){
+        char tmp[INET6_ADDRSTRLEN];
+
+        if (it->ai_family==AF_INET){
+            inet_ntop(it->ai_family, &reinterpret_cast<sockaddr_in*>(it->ai_addr)->sin_addr, tmp, INET6_ADDRSTRLEN);
+        } else {
+            inet_ntop(it->ai_family, &reinterpret_cast<sockaddr_in6*>(it->ai_addr)->sin6_addr, tmp, INET6_ADDRSTRLEN);
+        }
+
+        res.push_back(tmp);
+    }
+
+    freeaddrinfo(result);
+
+    return res;
+}
+
+static std::vector<std::string> getNameByAddr(const std::string& addr, socktype t, const unsigned short& port){
+    std::vector<std::string> res;
+
+    addrinfo hints, *result;
+    addrinfo *it;
+
+    memset(&hints, 0, sizeof(hints));
+
+    hints.ai_family=AF_UNSPEC;
+    hints.ai_socktype=t;
+    hints.ai_flags=AI_CANONNAME;
+
+    int ret=getaddrinfo(addr.c_str(), nullptr, nullptr, &result);
+    if (ret!=0){
+        throw std::logic_error(gai_strerror(ret));
+    }
+
+    for (it=result;it!=nullptr;it=it->ai_next){
+        char host[512];
+        ret=getnameinfo(it->ai_addr, it->ai_addrlen, host, 512, nullptr, 0, 0);
+
+        res.emplace_back(host);
+    }
+
+    freeaddrinfo(result);
+
+    return res;
+}
 
 struct SocketException: public std::exception {
 
