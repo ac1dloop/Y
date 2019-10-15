@@ -8,11 +8,18 @@ void process_connection(TCPSocket4 sock){
 	cout << "processing connection with client " << sock.Addr() << ':' << sock.Port() << '\n';
 
 	for (;sock.state;){
-		string s=sock.readStr("\r\n");
+        string s;
+        //operator >> automatically erases terminator "\r\n"
+        sock >> s;
 
-		cout << "recvd: " << s.substr(0, s.size()-2) << '\n';
-		
-		sock.writeStr(s);
+        //if client closes connection we handle empty string
+        if (s.empty())
+            break;
+
+        cout << "recvd: " << s << '\n';
+
+        //operator << autimatically appends terminator "\r\n"
+        sock << s;
 	}
 	
 	sock.Close();
@@ -25,10 +32,10 @@ int main(int argc, char **argv)
 		return -1;	
 	}
 
-	TCPSocket4 sock(argv[1], atoi(argv[2]));
+    TCPSocket4 sock(argv[1], stoul(argv[2]));
 
     sock.Bind();
-	sock.Listen();
+    sock.Listen();
 
 	for (;sock.state;){
 		TCPSocket4 client=sock.Accept();

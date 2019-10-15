@@ -220,7 +220,7 @@ static std::vector<std::string> getAddrByName(const std::string& hostname, sockt
     return res;
 }
 
-static std::vector<std::string> getNameByAddr(const std::string& addr, socktype t, const unsigned short& port){
+static std::vector<std::string> getNameByAddr(const std::string& addr, socktype t){
     std::vector<std::string> res;
 
     addrinfo hints, *result;
