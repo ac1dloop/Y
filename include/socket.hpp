@@ -23,10 +23,9 @@
  * move definitions to .cpp file
  * add win support
  * nothrow #ifdef
- * inherit from std::stream
- * add resolve functions */
+ * inherit from std::stream */
 
-#define MAX_BUF_LINE 256 
+#define MAX_BUF_LINE 256
 #define UDP_MAX_BUF 1500
 
 namespace Y {
@@ -531,12 +530,14 @@ struct RW_Interface: FD_Interface {
         s=s.substr(0, s.size()-2);
     }
 
-    void operator<<(const std::vector<char>& vec){
-        writePOD(vec.data(), vec.size());
+    template<typename T>
+    void operator<<(const std::vector<T>& vec){
+        writePOD(reinterpret_cast<const char*>(vec.data()), vec.size()*sizeof(T));
     }
 
-    void operator>>(std::vector<char>& vec){
-        readPOD(vec.data(), vec.size());
+    template<typename T>
+    void operator>>(std::vector<T>& vec){
+        readPOD(reinterpret_cast<char*>(vec.data()), vec.size()*sizeof(T));
     }
 
     std::string readStr(const std::string delim="\r\n"){
@@ -769,11 +770,11 @@ struct Socket<family::local, socktype::datagram> {
         return *this;
     }
 
-	void Bind(const std::string& path){
-		m_addr=ip_addr<family::local>(path.c_str());
+    void Bind(const std::string& path){
+        m_addr=ip_addr<family::local>(path.c_str());
 
-		Bind();
-	}
+        Bind();
+    }
 
     void Bind(){
         unlink(m_addr.Path().c_str());
@@ -844,7 +845,7 @@ struct Socket<family::local, socktype::datagram> {
             res.append(buf, ret);
             size_t d=res.find(delim);
 
-            cout << "ret: " << ret << " res: " << res << '\n';
+//            cout << "ret: " << ret << " res: " << res << '\n';
 
             if (d==std::string::npos){
                 cout << "no delim\n";
